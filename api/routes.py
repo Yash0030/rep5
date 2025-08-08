@@ -22,7 +22,7 @@ async def run_rag_endpoint(payload: HackRxRequest):
         from services.rag_service import process_documents_and_questions
         
         results = await process_documents_and_questions(
-            pdf_url=str(payload.documents),
+            file_url=str(payload.documents),
             questions=payload.questions
         )
         return {"answers": list(results.values())}
