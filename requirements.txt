@@ -19,6 +19,9 @@ pytesseract
 langchain_huggingface
 langchain-community
 langchain_pinecone
+pdf2image
+python-magic
+Pillow
 sentence-transformers>=2.7.0,<3.0.0
 huggingface-hub>=0.20.0,<1.0.0
 --extra-index-url https://download.pytorch.org/whl/cpu
