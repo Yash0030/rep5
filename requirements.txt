@@ -14,6 +14,8 @@ PyYAML>=6.0.0,<7.0.0
 pinecone-client>=3.0.0,<4.0.0
 cerebras_cloud_sdk
 groq
+langchain-groq
+pytesseract
 langchain_huggingface
 langchain-community
 langchain_pinecone
