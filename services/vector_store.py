@@ -321,15 +321,86 @@ async def embed_and_upsert(chunks: list[str], namespace: str, document_metadata:
         print(f"❌ Error in embed_and_upsert: {e}")
         return {"status": "error", "error": str(e)}
 
+# async def retrieve_from_kb(input_params):
+#     """
+#     Enhanced retrieval function with metadata filtering capabilities
+#     """
+#     try:
+#         query = input_params.get("query", "")
+#         agent_id = input_params.get("agent_id", "")
+#         top_k = input_params.get("top_k", 5)
+#         metadata_filter = input_params.get("filter", {})  # Added metadata filtering
+
+#         if not query:
+#             return {"chunks": [], "status": "error", "message": "Query is required"}
+#         if not agent_id:
+#             return {"chunks": [], "status": "error", "message": "Agent ID is required"}
+
+#         # Get embedding for query
+#         query_vector = embedding_model.embed_query(query)
+
+#         # Search in Pinecone using the vector with optional metadata filtering
+#         search_params = {
+#             "vector": query_vector,
+#             "namespace": agent_id,
+#             "top_k": top_k,
+#             "include_metadata": True
+#         }
+        
+#         # Add metadata filter if provided
+#         if metadata_filter:
+#             search_params["filter"] = metadata_filter
+
+#         results = index.query(**search_params)
+
+#         content_blocks = []
+#         detailed_results = []  # Enhanced results with full metadata
+        
+#         for match in results.matches:
+#             score = match.score
+#             if score > 0.0:
+#                 metadata = match.metadata or {}
+#                 text = metadata.get("text", "")
+#                 if text:
+#                     content_blocks.append(text)
+                    
+#                     # Enhanced result with metadata for potential use
+#                     detailed_results.append({
+#                         "text": text,
+#                         "score": score,
+#                         "metadata": {
+#                             "author": metadata.get("author", ""),
+#                             "title": metadata.get("title", ""),
+#                             "page": metadata.get("page", -1),
+#                             "source": metadata.get("source", ""),
+#                             "file_path": metadata.get("file_path", ""),
+#                             "subject": metadata.get("subject", ""),
+#                             "keywords": metadata.get("keywords", ""),
+#                             "creation_date": metadata.get("creationDate", ""),
+#                             "chunk_index": metadata.get("chunk_index", 0),
+#                             "section": metadata.get("section", "unknown"),
+#                             "type": metadata.get("type", "paragraph")
+#                         }
+#                     })
+
+#         return {
+#             "chunks": content_blocks,
+#             "detailed_results": detailed_results,  # Added for enhanced retrieval info
+#             "status": "success"
+#         }
+
+    # except Exception as e:
+    #     print(f"Error in retrieve_from_kb: {e}")
+    #     return {"chunks": [], "status": "error", "error": str(e)}
+
 async def retrieve_from_kb(input_params):
     """
-    Enhanced retrieval function with metadata filtering capabilities
+    Enhanced retrieval function without metadata filtering
     """
     try:
         query = input_params.get("query", "")
         agent_id = input_params.get("agent_id", "")
         top_k = input_params.get("top_k", 5)
-        metadata_filter = input_params.get("filter", {})  # Added metadata filtering
 
         if not query:
             return {"chunks": [], "status": "error", "message": "Query is required"}
@@ -339,23 +410,19 @@ async def retrieve_from_kb(input_params):
         # Get embedding for query
         query_vector = embedding_model.embed_query(query)
 
-        # Search in Pinecone using the vector with optional metadata filtering
+        # Search in Pinecone using the vector (no metadata filter)
         search_params = {
             "vector": query_vector,
             "namespace": agent_id,
             "top_k": top_k,
             "include_metadata": True
         }
-        
-        # Add metadata filter if provided
-        if metadata_filter:
-            search_params["filter"] = metadata_filter
 
         results = index.query(**search_params)
 
         content_blocks = []
         detailed_results = []  # Enhanced results with full metadata
-        
+
         for match in results.matches:
             score = match.score
             if score > 0.0:
@@ -363,7 +430,7 @@ async def retrieve_from_kb(input_params):
                 text = metadata.get("text", "")
                 if text:
                     content_blocks.append(text)
-                    
+
                     # Enhanced result with metadata for potential use
                     detailed_results.append({
                         "text": text,
@@ -392,6 +459,7 @@ async def retrieve_from_kb(input_params):
     except Exception as e:
         print(f"Error in retrieve_from_kb: {e}")
         return {"chunks": [], "status": "error", "error": str(e)}
+
 
 # Function routing
 FUNCTION_HANDLERS = {
