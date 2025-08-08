@@ -486,10 +486,10 @@ async def embed_file_to_pinecone(file_url: str, namespace: str, chunk_size: int 
             except Exception as e:
                 print(f"⚠️ Error cleaning up temp file: {e}")
 
-async def embed_pdf_to_pinecone(pdf_url: str, namespace: str, chunk_size: int = 1000, chunk_overlap: int = 200):
+async def embed_pdf_to_pinecone(file_url: str, namespace: str, chunk_size: int = 1000, chunk_overlap: int = 200):
     """Process PDF from URL and upload chunks to Pinecone."""
     # This function is kept for backward compatibility, but now uses the generalized embed_file_to_pinecone
-    return await embed_file_to_pinecone(pdf_url, namespace, chunk_size, chunk_overlap)
+    return await embed_file_to_pinecone(file_url, namespace, chunk_size, chunk_overlap)
 
 async def list_available_namespaces() -> list[str]:
     """Helper function to list all available namespaces in the Pinecone index"""
