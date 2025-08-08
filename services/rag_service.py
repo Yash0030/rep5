@@ -15,16 +15,7 @@ from langchain.schema import Document
 from langchain_pinecone import PineconeVectorStore
 from urllib.parse import urlparse
 from config.settings import settings
-
-
-# Additional imports for new file formats
-from openpyxl import load_workbook
-from PIL import Image
-import pytesseract
-import subprocess
-from pptx import Presentation
-from pdf2image import convert_from_path
-from docx import Document as DocxDocument
+from langchain_huggingface import HuggingFaceEndpointEmbeddings
 
 # Initialize Pinecone with error handling
 try:
@@ -91,194 +82,6 @@ def clean_metadata_for_pinecone(metadata: dict, max_total_size=2000) -> dict:
 
     return cleaned
 
-# New file format extraction functions
-def extract_text_from_xlsx(file_path: str) -> list[str]:
-    """Extract text from Excel files"""
-    wb = load_workbook(filename=file_path, read_only=True, data_only=True)
-    chunks = []
-    for sheet in wb.worksheets:
-        rows = list(sheet.iter_rows(values_only=True))
-        # Step 1: Identify the header row
-        header_row_index = None
-        for i, row in enumerate(rows):
-            if row and {"Name", "Mobile Number", "Pincode", "Salary"}.issubset(set(str(cell) for cell in row if cell)):
-                header_row_index = i
-                break
-        # Step 2: Extract message-like unstructured content before the table
-        for row in rows[:header_row_index]:
-            row_text = " ".join(str(cell) for cell in row if cell is not None)
-            if row_text.strip():
-                chunks.append(row_text.strip())
-        # Step 3: Extract structured data after the header
-        if header_row_index is not None:
-            headers = [str(cell) for cell in rows[header_row_index] if cell]
-            for row in rows[header_row_index + 1:]:
-                if any(row):  # skip empty rows
-                    row_text = " | ".join(
-                        f"{header}: {cell}" for header, cell in zip(headers, row) if cell is not None
-                    )
-                    if row_text.strip():
-                        chunks.append(row_text.strip())
-    print(f"📊 Extracted {len(chunks)} chunks from Excel")
-    print(f"🔍 First chunk (100 chars): {repr(chunks[0][:100]) if chunks else 'No chunks'}")
-    return chunks
-
-def extract_text_from_image(image_path: str) -> list[str]:
-    """Extract text from images using OCR"""
-    image = Image.open(image_path)
-    text = pytesseract.image_to_string(image)
-    
-    print(f"🖼️ Extracted text from image: {text[:100]}...")  # Log first 100 chars for debugging
-    chunks = [chunk.strip() for chunk in text.split("\n\n") if chunk.strip()]
-    print(f"🖼️ Extracted {len(chunks)} chunks from image")
-    print(f"🔍 First chunk (100 chars): {repr(chunks[0][:100]) if chunks else 'No chunks'}")
-    return chunks
-
-def pptx_to_pdf(pptx_path: str, output_dir: str) -> str:
-    """
-    Converts a PPTX file to PDF using LibreOffice and returns the actual PDF path.
-    """
-    command = [
-        "soffice",
-        "--headless",
-        "--convert-to", "pdf",
-        "--outdir", output_dir,
-        pptx_path
-    ]
-    try:
-        result = subprocess.run(command, capture_output=True, check=True)
-        print("✅ LibreOffice Output:", result.stdout.decode())
-    except subprocess.CalledProcessError as e:
-        print("❌ LibreOffice failed:", e.stderr.decode())
-        raise RuntimeError("PDF conversion failed") from e
-    pdf_filename = os.path.splitext(os.path.basename(pptx_path))[0] + ".pdf"
-    pdf_path = os.path.join(output_dir, pdf_filename)
-    if not os.path.exists(pdf_path):
-        raise FileNotFoundError(f"PDF not found at expected location: {pdf_path}")
-    return pdf_path
-
-def extract_text_from_pdf_ocr(pdf_path: str) -> list[str]:
-    """Extract text from PDF using OCR"""
-    slides = convert_from_path(pdf_path, dpi=300)
-    all_chunks = []
-    for i, image in enumerate(slides):
-        print(f"🔍 OCR on slide {i+1}")
-        text = pytesseract.image_to_string(image)
-        chunks = [chunk.strip() for chunk in text.split("\n\n") if chunk.strip()]
-        all_chunks.extend(chunks)
-    print(f"🖼️ Extracted {len(all_chunks)} chunks from OCR (PDF-based)")
-    return all_chunks
-
-def extract_text_from_pptx(pptx_path: str) -> list[str]:
-    """Extract text from PowerPoint files"""
-    prs = Presentation(pptx_path)
-    full_text = []
-    slides_needing_ocr = []
-    for i, slide in enumerate(prs.slides):
-        slide_text = []
-        for shape in slide.shapes:
-            if hasattr(shape, "text") and shape.text.strip():
-                slide_text.append(shape.text.strip())
-        if slide_text:
-            full_text.append("\n".join(slide_text))
-        else:
-            print(f"⚠️ No text found on slide {i+1}, marking for OCR.")
-            slides_needing_ocr.append(i)
-    if not slides_needing_ocr:
-        print("📊 All text extracted from PPTX without OCR.")
-        return [chunk.strip() for chunk in full_text if chunk.strip()]
-    with tempfile.TemporaryDirectory() as tmpdir:
-        pdf_path = pptx_to_pdf(pptx_path, tmpdir)
-        all_images = convert_from_path(pdf_path, dpi=300)
-        for i in slides_needing_ocr:
-            image = all_images[i]
-            print(f"🔍 OCR on slide {i+1}")
-            ocr_text = pytesseract.image_to_string(image)
-            ocr_chunks = [chunk.strip() for chunk in ocr_text.split("\n\n") if chunk.strip()]
-            full_text.extend(ocr_chunks)
-    print(f"📊 Extracted {len(full_text)} chunks from PPTX (with OCR fallback)")
-    print(f"🔍 First chunk (100 chars): {repr(full_text[0][:100]) if full_text else 'No chunks'}")
-    return [chunk.strip() for chunk in full_text if chunk.strip()]
-
-def extract_text_from_txt(txt_path: str) -> list[str]:
-    """Extract text from plain text files"""
-    with open(txt_path, "r", encoding="utf-8") as f:
-        content = f.read()
-    chunks = [chunk.strip() for chunk in content.split("\n\n") if chunk.strip()]
-    print(f"📜 Extracted {len(chunks)} chunks from TXT")
-    print(f"🔍 First chunk (100 chars): {repr(chunks[0][:100]) if chunks else 'No chunks'}")
-    return chunks
-
-def extract_text_from_docx(docx_path: str) -> list[str]:
-    """Extract text from Word documents"""
-    doc = DocxDocument(docx_path)
-    full_text = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
-    
-    chunks = [chunk.strip() for chunk in full_text.split("\n\n") if chunk.strip()]
-    
-    print(f"📝 Extracted {len(chunks)} chunks from DOCX")
-    print(f"🔍 First chunk (100 chars): {repr(chunks[0][:100]) if chunks else 'No chunks'}")
-    return chunks
-
-def detect_file_type(file_path: str) -> str:
-    """Detect file type based on extension"""
-    _, ext = os.path.splitext(file_path.lower())
-    return ext[1:]  # Remove the dot
-
-def load_and_extract_text_from_file(file_path: str) -> List[str]:
-    """
-    Load and extract text from various file formats.
-    Returns a list of text chunks.
-    """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
-    
-    file_name = os.path.basename(file_path)
-    file_type = detect_file_type(file_path)
-    
-    print(f"📄 Loading file: {file_name} (type: {file_type})")
-    
-    try:
-        if file_type == 'pdf':
-            # Use existing PDF loading logic
-            loader = PyMuPDFLoader(file_path)
-            docs = loader.load()
-            if not docs:
-                raise ValueError(f"No content found in PDF: {file_name}")
-            
-            # Convert to text chunks
-            chunks = []
-            for doc in docs:
-                if doc.page_content.strip():
-                    chunks.append(doc.page_content.strip())
-            print(f"📖 Loaded {len(chunks)} chunks from PDF")
-            
-        elif file_type in ['xlsx', 'xls']:
-            chunks = extract_text_from_xlsx(file_path)
-            
-        elif file_type in ['jpg', 'jpeg', 'png', 'bmp', 'tiff', 'tif']:
-            chunks = extract_text_from_image(file_path)
-            
-        elif file_type in ['pptx', 'ppt']:
-            chunks = extract_text_from_pptx(file_path)
-            
-        elif file_type == 'txt':
-            chunks = extract_text_from_txt(file_path)
-            
-        elif file_type in ['docx', 'doc']:
-            chunks = extract_text_from_docx(file_path)
-            
-        else:
-            raise ValueError(f"Unsupported file type: {file_type}")
-        
-        if not chunks:
-            raise ValueError(f"No text content extracted from file: {file_name}")
-        
-        return chunks
-        
-    except Exception as e:
-        raise Exception(f"Failed to extract text from {file_name}: {str(e)}")
-
 def load_and_split_pdf(file_path: str, chunk_size: int = 500, chunk_overlap: int = 100) -> List[Document]:
     """Load PDF and split into chunks using RecursiveCharacterTextSplitter."""
     if not os.path.exists(file_path):
@@ -318,115 +121,42 @@ def load_and_split_pdf(file_path: str, chunk_size: int = 500, chunk_overlap: int
     
     return chunks
 
-def load_and_split_file(file_path: str, chunk_size: int = 500, chunk_overlap: int = 100) -> List[Document]:
-    """
-    Load any supported file format and split into Document chunks.
-    This is a generalized version that handles all file types.
-    """
-    file_name = os.path.basename(file_path)
-    file_type = detect_file_type(file_path)
-    
-    # For PDF files, use the existing detailed PDF processing
-    if file_type == 'pdf':
-        return load_and_split_pdf(file_path, chunk_size, chunk_overlap)
-    
-    # For other file types, extract text and convert to Documents
+def download_pdf_from_url(url: str) -> str:
+    """Download PDF from URL to temporary file and return the file path."""
     try:
-        text_chunks = load_and_extract_text_from_file(file_path)
-        
-        # Convert text chunks to Document objects
-        documents = []
-        for i, chunk in enumerate(text_chunks):
-            doc = Document(
-                page_content=chunk,
-                metadata={
-                    "source_file": file_name,
-                    "file_type": file_type,
-                    "chunk_index": i
-                }
-            )
-            documents.append(doc)
-        
-        # Apply text splitting if chunks are too large
-        if any(len(doc.page_content) > chunk_size for doc in documents):
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-                length_function=len,
-                separators=["\n\n", "\n", ". ", " ", ""]
-            )
-            documents = text_splitter.split_documents(documents)
-            print(f"📚 Further split into {len(documents)} chunks")
-        
-        return documents
-        
-    except Exception as e:
-        raise Exception(f"Failed to process {file_name}: {str(e)}")
-
-def download_file_from_url(url: str) -> str:
-    """Download file from URL to temporary file and return the file path."""
-    try:
-        print(f"📥 Downloading file from: {url}")
+        print(f"📥 Downloading PDF from: {url}")
         response = requests.get(url, stream=True)
         response.raise_for_status()
         
-        # Try to determine file extension from URL or Content-Type
-        parsed_url = urlparse(url)
-        url_path = parsed_url.path
-        if '.' in url_path:
-            file_ext = os.path.splitext(url_path)[1]
-        else:
-            # Try to determine from Content-Type
-            content_type = response.headers.get('content-type', '').lower()
-            if 'pdf' in content_type:
-                file_ext = '.pdf'
-            elif 'excel' in content_type or 'spreadsheet' in content_type:
-                file_ext = '.xlsx'
-            elif 'powerpoint' in content_type or 'presentation' in content_type:
-                file_ext = '.pptx'
-            elif 'word' in content_type or 'document' in content_type:
-                file_ext = '.docx'
-            elif 'text' in content_type:
-                file_ext = '.txt'
-            elif 'image' in content_type:
-                if 'jpeg' in content_type:
-                    file_ext = '.jpg'
-                elif 'png' in content_type:
-                    file_ext = '.png'
-                else:
-                    file_ext = '.jpg'  # Default for images
-            else:
-                file_ext = ''  # No extension
+        # Check if it's actually a PDF
+        content_type = response.headers.get('content-type', '').lower()
+        if 'pdf' not in content_type and not url.lower().endswith('.pdf'):
+            print(f"⚠️ Warning: Content type is {content_type}, may not be a PDF")
         
         # Create temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
             for chunk in response.iter_content(chunk_size=8192):
                 temp_file.write(chunk)
             temp_path = temp_file.name
         
-        print(f"✅ File downloaded to: {temp_path}")
+        print(f"✅ PDF downloaded to: {temp_path}")
         return temp_path
         
     except Exception as e:
-        print(f"❌ Error downloading file: {e}")
+        print(f"❌ Error downloading PDF: {e}")
         raise
 
-def download_pdf_from_url(url: str) -> str:
-    """Download PDF from URL to temporary file and return the file path."""
-    # This function is kept for backward compatibility
-    return download_file_from_url(url)
-
-async def embed_file_to_pinecone(file_url: str, namespace: str, chunk_size: int = 1000, chunk_overlap: int = 200):
-    """Process any supported file format from URL and upload chunks to Pinecone."""
-    print(f"🚀 Starting file embedding for namespace: {namespace}")
+async def embed_pdf_to_pinecone(pdf_url: str, namespace: str, chunk_size: int = 1000, chunk_overlap: int = 200):
+    """Process PDF from URL and upload chunks to Pinecone."""
+    print(f"🚀 Starting PDF embedding for namespace: {namespace}")
     
     temp_file_path = None
     try:
-        # Download file to temporary location
-        temp_file_path = download_file_from_url(file_url)
+        # Download PDF to temporary file
+        temp_file_path = download_pdf_from_url(pdf_url)
         
-        # Load and split file based on its type
-        chunks = load_and_split_file(temp_file_path, chunk_size, chunk_overlap)
+        # Load and split PDF
+        chunks = load_and_split_pdf(temp_file_path, chunk_size, chunk_overlap)
         
         if not chunks:
             print("❌ No chunks to process")
@@ -434,9 +164,10 @@ async def embed_file_to_pinecone(file_url: str, namespace: str, chunk_size: int 
 
         # Initialize embedding model (using local sentence transformer)
         try:
-            embedding_model = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
-        )
+            embedding_model = HuggingFaceEndpointEmbeddings(
+                model="sentence-transformers/all-MiniLM-L6-v2",
+                huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_ACCESS_TOKEN")
+            )
             print("🤖 Local embedding model initialized")
         except Exception as e:
             print(f"❌ Error initializing embedding model: {str(e)}")
@@ -447,7 +178,7 @@ async def embed_file_to_pinecone(file_url: str, namespace: str, chunk_size: int 
         for chunk in chunks:
             cleaned_metadata = clean_metadata_for_pinecone(chunk.metadata)
             # Add URL to metadata
-            cleaned_metadata["source_url"] = file_url
+            cleaned_metadata["source_url"] = pdf_url
             cleaned_chunk = Document(
                 page_content=chunk.page_content, 
                 metadata=cleaned_metadata
@@ -475,7 +206,7 @@ async def embed_file_to_pinecone(file_url: str, namespace: str, chunk_size: int 
             return False
             
     except Exception as e:
-        print(f"❌ Error in file embedding process: {e}")
+        print(f"❌ Error in PDF embedding process: {e}")
         return False
     finally:
         # Clean up temporary file
@@ -485,11 +216,6 @@ async def embed_file_to_pinecone(file_url: str, namespace: str, chunk_size: int 
                 print(f"🗑️ Cleaned up temporary file: {temp_file_path}")
             except Exception as e:
                 print(f"⚠️ Error cleaning up temp file: {e}")
-
-async def embed_pdf_to_pinecone(file_url: str, namespace: str, chunk_size: int = 1000, chunk_overlap: int = 200):
-    """Process PDF from URL and upload chunks to Pinecone."""
-    # This function is kept for backward compatibility, but now uses the generalized embed_file_to_pinecone
-    return await embed_file_to_pinecone(file_url, namespace, chunk_size, chunk_overlap)
 
 async def list_available_namespaces() -> list[str]:
     """Helper function to list all available namespaces in the Pinecone index"""
@@ -501,12 +227,8 @@ async def list_available_namespaces() -> list[str]:
         print(f"Error retrieving namespaces: {e}")
         return []
 
-async def process_documents_and_questions(file_url: str, questions: list[str], namespace: str = None) -> dict:
-    """
-    Process documents (any supported format) and questions.
-    Updated to handle multiple file formats while maintaining backward compatibility.
-    """
-    print(f"Processing questions for file URL: {file_url}")
+async def process_documents_and_questions(pdf_url: str, questions: list[str], namespace: str = None) -> dict:
+    print(f"Processing questions for PDF URL: {pdf_url}")
     
     try:
         # Step 1: Handle namespace determination
@@ -516,7 +238,7 @@ async def process_documents_and_questions(file_url: str, questions: list[str], n
             print(f"📂 Using provided namespace: '{agent_id}'")
         else:
             # Generate namespace using the same logic as your embedding scripts
-            agent_id = generate_namespace_from_url(file_url)
+            agent_id = generate_namespace_from_url(pdf_url)
             print(f"📂 Generated namespace: '{agent_id}'")
         
         # Debug: Check what namespaces actually exist
@@ -555,37 +277,37 @@ async def process_documents_and_questions(file_url: str, questions: list[str], n
                         print(f"🔄 Found matching namespace: '{agent_id}'")
                         namespace_exists = True
                     else:
-                        # Namespace doesn't exist, so embed the file
-                        print(f"📥 Namespace not found. Embedding file from URL...")
-                        embedding_success = await embed_file_to_pinecone(
-                            file_url=file_url,
+                        # Namespace doesn't exist, so embed the PDF
+                        print(f"📥 Namespace not found. Embedding PDF from URL...")
+                        embedding_success = await embed_pdf_to_pinecone(
+                            pdf_url=pdf_url,
                             namespace=agent_id,
                             chunk_size=500,
                             chunk_overlap=100
                         )
                         
                         if not embedding_success:
-                            raise Exception(f"Failed to embed file from URL: {file_url}")
+                            raise Exception(f"Failed to embed PDF from URL: {pdf_url}")
                         
-                        print(f"✅ Successfully created namespace '{agent_id}' with file embeddings")
+                        print(f"✅ Successfully created namespace '{agent_id}' with PDF embeddings")
                         namespace_exists = True
                 else:
-                    # Provided namespace doesn't exist, embed the file
-                    print(f"📥 Provided namespace '{namespace}' not found. Embedding file from URL...")
-                    embedding_success = await embed_file_to_pinecone(
-                        file_url=file_url,
+                    # Provided namespace doesn't exist, embed the PDF
+                    print(f"📥 Provided namespace '{namespace}' not found. Embedding PDF from URL...")
+                    embedding_success = await embed_pdf_to_pinecone(
+                        pdf_url=pdf_url,
                         namespace=agent_id,
                         chunk_size=500,
                         chunk_overlap=100
                     )
                     
                     if not embedding_success:
-                        raise Exception(f"Failed to embed file for namespace '{namespace}'")
+                        raise Exception(f"Failed to embed PDF for namespace '{namespace}'")
                     
-                    print(f"✅ Successfully created namespace '{agent_id}' with file embeddings")
+                    print(f"✅ Successfully created namespace '{agent_id}' with PDF embeddings")
                 
         except Exception as e:
-            if "Failed to embed file" in str(e):
+            if "Failed to embed PDF" in str(e):
                 raise e
             print(f"Error checking namespaces: {e}")
             # Continue with the generated namespace anyway
