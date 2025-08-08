@@ -15,7 +15,7 @@ from langchain.schema import Document
 from langchain_pinecone import PineconeVectorStore
 from urllib.parse import urlparse
 from config.settings import settings
-from langchain_huggingface import HuggingFaceEndpointEmbeddings
+
 
 # Additional imports for new file formats
 from openpyxl import load_workbook
@@ -434,10 +434,9 @@ async def embed_file_to_pinecone(file_url: str, namespace: str, chunk_size: int 
 
         # Initialize embedding model (using local sentence transformer)
         try:
-            embedding_model = HuggingFaceEndpointEmbeddings(
-                model="sentence-transformers/all-MiniLM-L6-v2",
-                huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_ACCESS_TOKEN")
-            )
+            embedding_model = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
             print("🤖 Local embedding model initialized")
         except Exception as e:
             print(f"❌ Error initializing embedding model: {str(e)}")
